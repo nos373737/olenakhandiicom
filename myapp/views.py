@@ -1,3 +1,8 @@
+import json
+from urllib.error import URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
+
 from django.shortcuts import render,redirect
 from django.contrib.auth.models import User,auth
 from django.contrib.auth import authenticate
@@ -9,6 +14,8 @@ from .models import *
 
 from .models import Comment,Post
 # Create your views here.
+
+TURNSTILE_SITEVERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
 
 def _post_queryset():
     return Post.objects.select_related("category", "user")
@@ -175,18 +182,64 @@ def deletepost(request,id):
     return profile(request,request.user.id)
 
 
+def _client_ip(request):
+    connecting_ip = request.META.get("HTTP_CF_CONNECTING_IP")
+    if connecting_ip:
+        return connecting_ip
+
+    forwarded_for = request.META.get("HTTP_X_FORWARDED_FOR", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+
+    return request.META.get("REMOTE_ADDR", "")
+
+
+def _verify_turnstile_token(token, remote_ip):
+    if not token or not settings.TURNSTILE_SECRET_KEY:
+        return False
+
+    data = {
+        "secret": settings.TURNSTILE_SECRET_KEY,
+        "response": token,
+    }
+    if remote_ip:
+        data["remoteip"] = remote_ip
+
+    request = Request(
+        TURNSTILE_SITEVERIFY_URL,
+        data=urlencode(data).encode("utf-8"),
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=settings.TURNSTILE_VERIFY_TIMEOUT) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except (OSError, URLError, json.JSONDecodeError):
+        return False
+
+    return result.get("success") is True
+
+
 def contact_us(request):
-    context = {}
+    context = {"turnstile_site_key": settings.TURNSTILE_SITE_KEY}
     if request.method == 'POST':
         name = request.POST.get('name', '').strip()
         email = request.POST.get('email', '').strip()
         messenger = request.POST.get('messenger', '').strip()
         message = request.POST.get('message', '').strip()
         answer_files = request.FILES.getlist("answer_files")
+        turnstile_token = request.POST.get("cf-turnstile-response", "").strip()
 
         allowed_extensions = {".pdf", ".jpg", ".jpeg", ".png", ".heic", ".doc", ".docx"}
         total_size = sum(upload.size for upload in answer_files)
         errors = []
+
+        if settings.TURNSTILE_REQUIRED:
+            if not settings.TURNSTILE_SITE_KEY or not settings.TURNSTILE_SECRET_KEY:
+                errors.append("Перевірка безпеки тимчасово недоступна. Будь ласка, напишіть напряму в Telegram.")
+            elif not _verify_turnstile_token(turnstile_token, _client_ip(request)):
+                errors.append("Підтвердіть, що ви не робот, і спробуйте надіслати форму ще раз.")
 
         if not answer_files:
             errors.append("Додайте файл з відповідями: фото, скріншот, PDF або документ.")

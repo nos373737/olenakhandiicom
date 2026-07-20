@@ -13,6 +13,10 @@
   <link rel="stylesheet" href="{% static 'assets/css/styles.css' %}">
   <link rel="icon" type="image/png" sizes="32x32" href="{% static 'assets/images/favicon-32x32.png' %}">
   <link rel="icon" type="image/png" sizes="16x16" href="{% static 'assets/images/favicon-16x16.png' %}">
+  {% if turnstile_site_key %}
+  <link rel="preconnect" href="https://challenges.cloudflare.com">
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  {% endif %}
 </head>
 
 <body>
@@ -218,6 +222,10 @@
               <label for="answer_files">Файли з відповідями</label>
               <input name="answer_files" type="file" id="answer_files" multiple required accept=".pdf,.jpg,.jpeg,.png,.heic,.doc,.docx">
               <small>Підходять PDF, фото, скріншоти або документи. Максимум 10 MB на файл.</small>
+
+              {% if turnstile_site_key %}
+              <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" data-theme="auto"></div>
+              {% endif %}
 
               <button type="submit" class="btn btn-brand">Надіслати відповіді</button>
             </form>

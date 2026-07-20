@@ -2,6 +2,7 @@ from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
 from django.contrib.auth.models import User
+from unittest.mock import patch
 from .models import Post, Category, Comment, Contact
 
 class CategoryModelTest(TestCase):
@@ -132,13 +133,14 @@ class ViewsTest(TestCase):
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
 class ContactRequestViewTest(TestCase):
-    def test_contact_request_sends_uploaded_answer_file(self):
-        answer_file = SimpleUploadedFile(
+    def _answer_file(self):
+        return SimpleUploadedFile(
             "answers.pdf",
             b"test answers",
             content_type="application/pdf",
         )
 
+    def test_contact_request_sends_uploaded_answer_file(self):
         response = self.client.post(
             "/contact",
             {
@@ -146,7 +148,7 @@ class ContactRequestViewTest(TestCase):
                 "email": "student@example.com",
                 "messenger": "@student",
                 "message": "I want to improve speaking.",
-                "answer_files": answer_file,
+                "answer_files": self._answer_file(),
             },
         )
 
@@ -155,6 +157,78 @@ class ContactRequestViewTest(TestCase):
         self.assertTrue(Contact.objects.filter(email="student@example.com").exists())
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].attachments[0][0], "answers.pdf")
+
+    @override_settings(
+        TURNSTILE_REQUIRED=True,
+        TURNSTILE_SITE_KEY="test-site-key",
+        TURNSTILE_SECRET_KEY="test-secret-key",
+    )
+    @patch("myapp.views._verify_turnstile_token", return_value=True)
+    def test_contact_request_accepts_valid_turnstile_token(self, verify_turnstile_token):
+        response = self.client.post(
+            "/contact",
+            {
+                "name": "Student",
+                "email": "student@example.com",
+                "messenger": "@student",
+                "message": "I want to improve speaking.",
+                "cf-turnstile-response": "valid-token",
+                "answer_files": self._answer_file(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Відповіді надіслано")
+        self.assertTrue(Contact.objects.filter(email="student@example.com").exists())
+        self.assertEqual(len(mail.outbox), 1)
+        verify_turnstile_token.assert_called_once()
+
+    @override_settings(
+        TURNSTILE_REQUIRED=True,
+        TURNSTILE_SITE_KEY="test-site-key",
+        TURNSTILE_SECRET_KEY="test-secret-key",
+    )
+    @patch("myapp.views._verify_turnstile_token", return_value=False)
+    def test_contact_request_rejects_invalid_turnstile_token(self, verify_turnstile_token):
+        response = self.client.post(
+            "/contact",
+            {
+                "name": "Student",
+                "email": "student@example.com",
+                "messenger": "@student",
+                "message": "I want to improve speaking.",
+                "cf-turnstile-response": "invalid-token",
+                "answer_files": self._answer_file(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Підтвердіть, що ви не робот")
+        self.assertFalse(Contact.objects.filter(email="student@example.com").exists())
+        self.assertEqual(len(mail.outbox), 0)
+        verify_turnstile_token.assert_called_once()
+
+    @override_settings(
+        TURNSTILE_REQUIRED=True,
+        TURNSTILE_SITE_KEY="",
+        TURNSTILE_SECRET_KEY="",
+    )
+    def test_contact_request_rejects_missing_turnstile_configuration(self):
+        response = self.client.post(
+            "/contact",
+            {
+                "name": "Student",
+                "email": "student@example.com",
+                "messenger": "@student",
+                "message": "I want to improve speaking.",
+                "answer_files": self._answer_file(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Перевірка безпеки тимчасово недоступна")
+        self.assertFalse(Contact.objects.filter(email="student@example.com").exists())
+        self.assertEqual(len(mail.outbox), 0)
 
 
 class ReviewsRedirectTest(TestCase):
