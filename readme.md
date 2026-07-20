@@ -126,6 +126,14 @@ DJANGO_EMAIL_HOST_PASSWORD=your-smtp-password
 DJANGO_EMAIL_USE_TLS=True
 ```
 
+To protect the completed-test upload form with Cloudflare Turnstile, create a Turnstile widget in Cloudflare for `olenakhandii.com` and add both keys to `/etc/olena-khandii.env`:
+
+```bash
+DJANGO_TURNSTILE_SITE_KEY=your-public-site-key
+DJANGO_TURNSTILE_SECRET_KEY=your-private-secret-key
+DJANGO_TURNSTILE_REQUIRED=True
+```
+
 Then restart the service:
 
 ```bash

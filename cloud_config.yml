@@ -88,6 +88,7 @@ write_files:
 
       ensure_env_var "DJANGO_TEACHER_EMAIL" "olenakhandii@gmail.com"
       ensure_env_var "DJANGO_DEFAULT_FROM_EMAIL" "website@olenakhandii.com"
+      ensure_env_var "DJANGO_TURNSTILE_REQUIRED" "True"
 
       set -a
       # shellcheck disable=SC1090
