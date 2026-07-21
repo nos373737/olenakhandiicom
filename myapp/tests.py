@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.core import mail
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings
@@ -82,9 +84,14 @@ class ViewsTest(TestCase):
 
     def test_index_view(self):
         self.client.login(username="testuser", password="password")
-        response = self.client.get("/")
+        with self.assertLogs("myapp.requests", level="INFO") as captured_logs:
+            response = self.client.get("/?private=value")
+
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "index.html")
+        self.assertIn("X-Request-ID", response)
+        self.assertIn("request_completed", captured_logs.output[0])
+        self.assertNotIn("private=value", captured_logs.output[0])
 
     def test_blog_view(self):
         self.client.login(username="testuser", password="password")
@@ -155,6 +162,30 @@ class ContactRequestViewTest(TestCase):
         self.assertTrue(Contact.objects.filter(email="student@example.com").exists())
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].attachments[0][0], "answers.pdf")
+
+    @patch("myapp.views.EmailMessage.send", side_effect=RuntimeError("SMTP unavailable"))
+    def test_contact_request_logs_email_delivery_failure(self, mocked_send):
+        answer_file = SimpleUploadedFile(
+            "answers.pdf",
+            b"test answers",
+            content_type="application/pdf",
+        )
+
+        with self.assertLogs("myapp.views", level="ERROR") as captured_logs:
+            response = self.client.post(
+                "/contact",
+                {
+                    "name": "Student",
+                    "email": "student@example.com",
+                    "answer_files": answer_file,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "лист не вдалося надіслати")
+        self.assertTrue(Contact.objects.filter(email="student@example.com").exists())
+        self.assertIn("contact_email_send_failed", captured_logs.output[0])
+        mocked_send.assert_called_once_with(fail_silently=False)
 
 
 class ReviewsRedirectTest(TestCase):

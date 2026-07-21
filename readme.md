@@ -132,6 +132,34 @@ Then restart the service:
 sudo systemctl restart olena-khandii
 ```
 
+## Application Logs
+
+Production application events, request timing, and exception tracebacks are written to:
+
+```text
+/var/log/olenakhandii/website.log
+```
+
+Follow the log while reproducing a problem:
+
+```bash
+sudo tail -f /var/log/olenakhandii/website.log
+```
+
+For an existing server that was provisioned before application file logging was added, create the writable path once before deploying the updated application:
+
+```bash
+sudo install -d -o www-data -g www-data -m 0750 /var/log/olenakhandii
+sudo touch /var/log/olenakhandii/website.log
+sudo chown www-data:www-data /var/log/olenakhandii/website.log
+sudo chmod 0640 /var/log/olenakhandii/website.log
+sudo install -m 0644 /opt/website/deploy/olena-khandii.logrotate /etc/logrotate.d/olena-khandii
+```
+
+Contact submissions log milestones for validation, database persistence, attachment preparation, and SMTP delivery. Personal message contents, passwords, and uploaded file contents are not logged. Logs rotate daily and 14 compressed rotations are retained.
+
+Local development logs to the console. The production path and log level can be overridden with `DJANGO_WEBSITE_LOG_PATH` and `DJANGO_LOG_LEVEL`.
+
 ## Frontend Direction
 
 The current design is built around a personal teacher brand rather than a generic blog template:

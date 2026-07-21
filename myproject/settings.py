@@ -59,6 +59,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     'whitenoise.middleware.WhiteNoiseMiddleware',
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "myproject.middleware.RequestLoggingMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -181,3 +182,53 @@ INSTAGRAM_REVIEWS_URL = os.getenv(
     "DJANGO_INSTAGRAM_REVIEWS_URL",
     "https://www.instagram.com/s/aGlnaGxpZ2h0OjE4MDE4ODIxMjAzNzc2NDUy?igsh=MTNzM2lxcG1lZWo3aQ==",
 )
+
+
+WEBSITE_LOG_PATH = os.getenv(
+    "DJANGO_WEBSITE_LOG_PATH",
+    "/var/log/olenakhandii/website.log",
+)
+WEBSITE_LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "INFO").upper()
+WEBSITE_LOG_HANDLERS = ["console"] if DEBUG else ["console", "website"]
+WEBSITE_LOGGING_HANDLERS = {
+    "console": {
+        "class": "logging.StreamHandler",
+        "formatter": "website",
+    },
+}
+
+if not DEBUG:
+    WEBSITE_LOGGING_HANDLERS["website"] = {
+        "class": "logging.handlers.WatchedFileHandler",
+        "filename": WEBSITE_LOG_PATH,
+        "formatter": "website",
+    }
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "website": {
+            "format": "{asctime} {levelname} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": WEBSITE_LOGGING_HANDLERS,
+    "loggers": {
+        "myapp": {
+            "handlers": WEBSITE_LOG_HANDLERS,
+            "level": WEBSITE_LOG_LEVEL,
+            "propagate": False,
+        },
+        "django.request": {
+            "handlers": WEBSITE_LOG_HANDLERS,
+            "level": "WARNING",
+            "propagate": False,
+        },
+        "django.security": {
+            "handlers": WEBSITE_LOG_HANDLERS,
+            "level": "WARNING",
+            "propagate": False,
+        },
+    },
+}

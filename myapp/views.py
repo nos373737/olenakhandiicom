@@ -1,3 +1,5 @@
+import logging
+
 from django.shortcuts import render,redirect
 from django.contrib.auth.models import User,auth
 from django.contrib.auth import authenticate
@@ -9,6 +11,12 @@ from .models import *
 
 from .models import Comment,Post
 # Create your views here.
+
+logger = logging.getLogger(__name__)
+
+
+def _request_id(request):
+    return getattr(request, "request_id", "unknown")
 
 def _post_queryset():
     return Post.objects.select_related("category", "user")
@@ -32,15 +40,20 @@ def signup(request):
         
         if password == password2:
             if User.objects.filter(username=username).exists():
+                logger.warning("signup_rejected request_id=%s reason=username_exists", _request_id(request))
                 messages.info(request,"Username already Exists")
                 return redirect('signup')
             if User.objects.filter(email=email).exists():
+                logger.warning("signup_rejected request_id=%s reason=email_exists", _request_id(request))
                 messages.info(request,"Email already Exists")
                 return redirect('signup')
             else:
-                User.objects.create_user(username=username,email=email,password=password).save()
+                user = User.objects.create_user(username=username,email=email,password=password)
+                user.save()
+                logger.info("signup_succeeded request_id=%s user_id=%s", _request_id(request), user.pk)
                 return redirect('signin')
         else:
+            logger.warning("signup_rejected request_id=%s reason=password_mismatch", _request_id(request))
             messages.info(request,"Password should match")
             return redirect('signup')
             
@@ -53,15 +66,19 @@ def signin(request):
         user = authenticate(request,username=username,password=password)
         if user is not None:
             auth.login(request,user)
+            logger.info("signin_succeeded request_id=%s user_id=%s", _request_id(request), user.pk)
             return redirect("index")
         else:
+            logger.warning("signin_failed request_id=%s", _request_id(request))
             messages.info(request,'Username or Password is incorrect')
             return redirect("signin")
             
     return render(request,"signin.html")
 
 def logout(request):
+    user_id = request.user.pk if request.user.is_authenticated else "anonymous"
     auth.logout(request)
+    logger.info("logout_succeeded request_id=%s user_id=%s", _request_id(request), user_id)
     return redirect('index')
 
 def blog(request):
@@ -81,9 +98,21 @@ def create(request):
             category_id = request.POST['category']
             category = Category.objects.get(id=category_id)
             image = request.FILES.get('image')
-            Post(postname=postname, content=content, category=category, image=image, user=request.user).save()
-        except Exception as e:
-            print(f"Error: {e}")
+            created_post = Post(postname=postname, content=content, category=category, image=image, user=request.user)
+            created_post.save()
+            logger.info(
+                "post_created request_id=%s post_id=%s user_id=%s has_image=%s",
+                _request_id(request),
+                created_post.pk,
+                request.user.pk,
+                bool(image),
+            )
+        except Exception:
+            logger.exception(
+                "post_create_failed request_id=%s user_id=%s",
+                _request_id(request),
+                getattr(request.user, "pk", None),
+            )
         return redirect('index')
     else:
         categories = Category.objects.all()
@@ -109,6 +138,12 @@ def profileedit(request,id):
         user.email = email
         user.last_name = lastname
         user.save()
+        logger.info(
+            "profile_updated request_id=%s user_id=%s actor_user_id=%s",
+            _request_id(request),
+            user.pk,
+            getattr(request.user, "pk", None),
+        )
         return profile(request,id)
     return render(request,"profileedit.html",{
         'user':User.objects.get(id=id),
@@ -119,6 +154,7 @@ def increaselikes(request,id):
         post = Post.objects.get(id=id)
         post.likes += 1
         post.save() 
+        logger.info("post_liked request_id=%s post_id=%s", _request_id(request), post.pk)
     return redirect(request.META.get("HTTP_REFERER", "index"))
 
 
@@ -138,13 +174,29 @@ def savecomment(request,id):
     post = Post.objects.get(id=id)
     if request.method == 'POST':
         content = request.POST['message']
-        Comment(post_id = post.id,user_id = request.user.id, content = content).save()
+        comment = Comment(post_id = post.id,user_id = request.user.id, content = content)
+        comment.save()
+        logger.info(
+            "comment_created request_id=%s comment_id=%s post_id=%s user_id=%s",
+            _request_id(request),
+            comment.pk,
+            post.pk,
+            request.user.pk,
+        )
         return redirect("index")
     
 def deletecomment(request,id):
     comment = Comment.objects.get(id=id)
     postid = comment.post.id
+    comment_id = comment.pk
     comment.delete()
+    logger.info(
+        "comment_deleted request_id=%s comment_id=%s post_id=%s user_id=%s",
+        _request_id(request),
+        comment_id,
+        postid,
+        getattr(request.user, "pk", None),
+    )
     return post(request,postid)
     
 def editpost(request, id):
@@ -160,8 +212,19 @@ def editpost(request, id):
             post.content = content
             post.category = category  # Assign the Category object
             post.save()
-        except Exception as e:
-            print(f"Error: {e}")
+            logger.info(
+                "post_updated request_id=%s post_id=%s user_id=%s",
+                _request_id(request),
+                post.pk,
+                getattr(request.user, "pk", None),
+            )
+        except Exception:
+            logger.exception(
+                "post_update_failed request_id=%s post_id=%s user_id=%s",
+                _request_id(request),
+                post.pk,
+                getattr(request.user, "pk", None),
+            )
         return profile(request, request.user.id)
     
     categories = Category.objects.all()  # Fetch all categories for the dropdown
@@ -171,7 +234,14 @@ def editpost(request, id):
     })
     
 def deletepost(request,id):
-    Post.objects.get(id=id).delete()
+    deleted_post = Post.objects.get(id=id)
+    deleted_post.delete()
+    logger.info(
+        "post_deleted request_id=%s post_id=%s user_id=%s",
+        _request_id(request),
+        id,
+        getattr(request.user, "pk", None),
+    )
     return profile(request,request.user.id)
 
 
@@ -188,6 +258,13 @@ def contact_us(request):
         total_size = sum(upload.size for upload in answer_files)
         errors = []
 
+        logger.info(
+            "contact_submission_received request_id=%s file_count=%s total_bytes=%s",
+            _request_id(request),
+            len(answer_files),
+            total_size,
+        )
+
         if not answer_files:
             errors.append("Додайте файл з відповідями: фото, скріншот, PDF або документ.")
 
@@ -202,6 +279,13 @@ def contact_us(request):
             errors.append("Загальний розмір файлів завеликий. Спробуйте надіслати менше файлів або стиснути фото.")
 
         if errors:
+            logger.warning(
+                "contact_submission_rejected request_id=%s error_count=%s file_count=%s total_bytes=%s",
+                _request_id(request),
+                len(errors),
+                len(answer_files),
+                total_size,
+            )
             context["errors"] = errors
             context["form_data"] = request.POST
         else:
@@ -213,7 +297,15 @@ def contact_us(request):
                 f"Файли з відповідями: {file_names}"
             )
 
-            Contact(name=name, email=email, subject=subject, message=saved_message).save()
+            contact = Contact(name=name, email=email, subject=subject, message=saved_message)
+            contact.save()
+            logger.info(
+                "contact_submission_saved request_id=%s contact_id=%s file_count=%s total_bytes=%s",
+                _request_id(request),
+                contact.pk,
+                len(answer_files),
+                total_size,
+            )
 
             email_message = EmailMessage(
                 subject=f"[Olena Khandii] {subject}",
@@ -230,15 +322,53 @@ def contact_us(request):
                 reply_to=[email] if email else None,
             )
 
+            logger.info(
+                "contact_email_attachments_started request_id=%s contact_id=%s attachment_count=%s total_bytes=%s",
+                _request_id(request),
+                contact.pk,
+                len(answer_files),
+                total_size,
+            )
             for upload in answer_files:
                 email_message.attach(upload.name, upload.read(), upload.content_type)
+            logger.info(
+                "contact_email_attachments_completed request_id=%s contact_id=%s attachment_count=%s",
+                _request_id(request),
+                contact.pk,
+                len(answer_files),
+            )
 
             try:
-                email_message.send(fail_silently=False)
+                logger.info(
+                    "contact_email_send_started request_id=%s contact_id=%s attachment_count=%s total_bytes=%s backend=%s smtp_host=%s smtp_port=%s tls=%s ssl=%s",
+                    _request_id(request),
+                    contact.pk,
+                    len(answer_files),
+                    total_size,
+                    settings.EMAIL_BACKEND,
+                    settings.EMAIL_HOST or "-",
+                    settings.EMAIL_PORT,
+                    settings.EMAIL_USE_TLS,
+                    settings.EMAIL_USE_SSL,
+                )
+                sent_count = email_message.send(fail_silently=False)
+                logger.info(
+                    "contact_email_send_succeeded request_id=%s contact_id=%s sent_count=%s",
+                    _request_id(request),
+                    contact.pk,
+                    sent_count,
+                )
                 context["success_message"] = (
                     "Дякую! Відповіді надіслано. Я перегляну тест і напишу вам щодо наступного кроку."
                 )
             except Exception:
+                logger.exception(
+                    "contact_email_send_failed request_id=%s contact_id=%s attachment_count=%s total_bytes=%s",
+                    _request_id(request),
+                    contact.pk,
+                    len(answer_files),
+                    total_size,
+                )
                 context["errors"] = [
                     "Заявку збережено, але лист не вдалося надіслати. Будь ласка, напишіть напряму на email викладача."
                 ]
